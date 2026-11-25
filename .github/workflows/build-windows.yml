@@ -1,0 +1,49 @@
+name: Build PulseTrigger 2 (Windows VST3 & Standalone)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Auto-extract newest ZIP & Configure CMake
+        shell: pwsh
+        run: |
+          $zips = Get-ChildItem -Filter "*.zip" | Sort-Object LastWriteTime -Descending
+          if ($zips.Count -gt 0) {
+            if (Test-Path "_unzipped") { Remove-Item -Recurse -Force "_unzipped" }
+            Expand-Archive -Path $zips[0].FullName -DestinationPath "_unzipped" -Force
+            $cm = Get-ChildItem -Path "_unzipped" -Recurse -Filter "CMakeLists.txt" | Select-Object -First 1
+          } else {
+            $cm = Get-ChildItem -Recurse -Filter "CMakeLists.txt" | Select-Object -First 1
+          }
+          if (-not $cm) { throw "CMakeLists.txt nao encontrado" }
+          $src = $cm.Directory.FullName
+          Write-Host "Compilando projeto em: $src"
+          cmake -S "$src" -B build -A x64
+
+      - name: Build VST3, Standalone & DSP Tests (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Run C++20 DSP Unit Tests
+        run: .\build\Release\dsp_verify.exe
+
+      - name: Package Windows VST3 & Standalone
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Recurse "build\PulseTrigger2_artefacts\Release\VST3\*" dist\
+          Copy-Item -Recurse "build\PulseTrigger2_artefacts\Release\Standalone\*" dist\
+
+      - name: Upload PulseTrigger 2 Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PulseTrigger2-Windows-VST3-Standalone
+          path: dist/
+          retention-days: 30
